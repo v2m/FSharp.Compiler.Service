@@ -286,8 +286,11 @@ type ProjectOptions =
       /// Unused in this API and should be 'None'
       UnresolvedReferences : UnresolvedReferencesSet option
     }
-         
-          
+
+[<Sealed>]
+type ParseSettings =
+    member CanParse: bool
+
 /// Callback which can be used by the host to indicate to the checker that a requested result has become obsolete,
 /// e.g. because of typing by the user in the editor window. This can be used to marginally increase accuracy
 /// of intellisense results in some situations.
@@ -328,6 +331,10 @@ type InteractiveChecker =
     /// <param name="source">The full source for the file.</param>
     /// <param name="options">The options for the project or script, used to determine active --define conditionals and other options relevant to parsing.</param>
     member ParseFileInProject : filename: string * source: string * options: ProjectOptions -> Async<ParseFileResults>
+
+    member GetParseSettings: options: ProjectOptions -> Async<ParseSettings>
+
+    member ParseOneFile: filename: string * source: string * settings: ParseSettings -> ParseFileResults
 
     /// <summary>
     /// <para>Check a source code file, returning a handle to the results of the parse including

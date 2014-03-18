@@ -66,8 +66,6 @@ module EnvMisc =
     let untypedCheckMruSize = GetEnvInteger "mFSharp_UntypedCheckMruCacheSize" 2
     let maxTypeCheckErrorsOutOfProjectContext = GetEnvInteger "mFSharp_MaxErrorsOutOfProjectContext" 3
 
-
-
 //----------------------------------------------------------------------------
 // Methods
 //--------------------------------------------------------------------------
@@ -1571,7 +1569,17 @@ type ProjectOptions =
             this.ProjectOptions |> Array.iter (fun op -> sb.AppendFormat("{0} ", op) |> ignore)
             sb.ToString()
         sprintf "ProjectOptions(%s)\n  Files:\n%s  Options: %s" this.ProjectFileName files options
- 
+
+[<NoEquality; NoComparison; RequireQualifiedAccess>]
+type ParseSettings =
+    private
+    | Success of sourceFiles: string list * dependencies: string list * tcConfig: TcConfig
+    | Error of errors: ErrorInfo list
+    member x.CanParse = 
+        match x with
+        | Success _ -> true
+        | Error _ -> false
+
 type IReactorOperations = 
     abstract RunAsyncOp : (unit -> 'T) -> Async<'T>
     abstract AsyncOp: Reactor.Operation -> unit
@@ -1912,6 +1920,22 @@ type BackgroundCompiler() as self =
         | Parser.TypeCheckAborted.Yes  ->  CheckFileAnswer.Aborted                
         | Parser.TypeCheckAborted.No scope -> CheckFileAnswer.Succeeded(MakeCheckFileResults(options, builder, scope, creationErrors, parseErrors, tcErrors))
 
+    
+    member bc.GetParseSettings(options: ProjectOptions) = 
+        reactor.RunAsyncOp <| fun () ->
+            let builderOpt,creationErrors,_ = incrementalBuildersCache.Get(options) // Q: Whis it it ok to ignore creationErrors in the build cache? A: These errors will be appended into the typecheck results
+            match builderOpt with
+            | None -> ParseSettings.Error creationErrors
+            | Some builder -> ParseSettings.Success(builder.ProjectFileNames, builder.Dependencies, builder.TcConfig)
+
+    member bc.ParseOneFile(filename: string, source: string, parseSettings: ParseSettings) =
+        match parseSettings with
+        | ParseSettings.Error creationErrors -> ParseFileResults(List.toArray creationErrors, None, true, [])
+        | ParseSettings.Success(sourceFiles, dependencies, tcConfig) ->
+            let parseErrors, _matchPairs, inputOpt, anyErrors = 
+               Parser.ParseOneFile (source, false, true, filename, sourceFiles, tcConfig)
+                 
+            ParseFileResults(parseErrors, inputOpt, anyErrors, dependencies)
 
     /// Parses the source file and returns untyped AST
     member bc.ParseFileInProject(filename:string, source,options:ProjectOptions) =
@@ -2214,7 +2238,11 @@ type InteractiveChecker() =
 
     member ic.ParseFileInProject(filename, source, options) =
         untypedCheckMru.Get((filename, source, options))
-        
+    
+    member ic.GetParseSettings(options) = backgroundCompiler.GetParseSettings options
+
+    member ic.ParseOneFile(filename, source, settings) = backgroundCompiler.ParseOneFile(filename, source, settings)
+
     member ic.GetBackgroundParseResultsForFileInProject (filename,options) =
         backgroundCompiler.GetBackgroundParseResultsForFileInProject(filename,options)
         
